@@ -56,13 +56,18 @@ jobs:
           username: ${{ secrets.SERVER_USERNAME }}
           key: ${{ secrets.SERVER_PRIVATE_KEY }}
           script: |
-          echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-          
-      
-          docker pull ${{ env.IMAGE_NAME }}:${{ github.sha }}
-          
-          
-          docker stop my-website || true
-          docker rm my-website || true
-          
-          docker run -d -p 80:80 --name my-website ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            # 以下是在你服务器上执行的命令
+            
+            # 1. 登录到GHCR，让服务器也有权限拉取镜像
+            # 我们用PAT作为密码，通过管道符输入，更安全
+            echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            
+            # 2. 拉取刚刚构建好的、带有唯一版本号的镜像
+            docker pull ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            
+            # 3. 停止并删除旧的网站容器（如果存在的话）
+            docker stop my-website || true
+            docker rm my-website || true
+            
+            # 4. 启动一个新的容器，使用最新的镜像
+            docker run -d -p 80:80 --name my-website ${{ env.IMAGE_NAME }}:${{ github.sha }}
