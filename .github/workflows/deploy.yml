@@ -1,0 +1,73 @@
+name: Build and Deploy Nginx using GitHub Packages
+
+on:
+  push:
+    branches:
+      - main
+
+# 定义一个环境变量，方便后面统一使用镜像名称
+env:
+  # 格式是固定的：ghcr.io/你的GitHub用户名/你的仓库名
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
+
+jobs:
+  # 任务一：构建镜像并推送到GitHub Packages
+  build_and_push_to_ghcr:
+    runs-on: ubuntu-latest
+    # 这一步是新的！必须给Job授权，允许它写入Packages
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      # 1. 下载代码
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      # 2. 登录到GitHub Packages (GHCR)
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          # 用户名是固定的，就是触发这个流程的GitHub用户
+          username: ${{ github.actor }}
+          # 密码就是我们刚刚存进保险箱的“超级钥匙”
+          password: ${{ secrets.GHCR_PAT }}
+
+      # 3. 构建镜像并打上唯一的版本标签，然后推送到GHCR
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          # 完整的镜像名称，例如：ghcr.io/my-username/my-repo:a1b2c3d4
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+  # 任务二：在你的服务器上部署新镜像
+  deploy_to_server:
+    # 必须等任务一成功后才开始
+    needs: build_and_push_to_ghcr
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SERVER_PRIVATE_KEY }}
+          script:
+            # 以下是在你服务器上执行的命令
+            
+            # 1. 登录到GHCR，让服务器也有权限拉取镜像
+            # 我们用PAT作为密码，通过管道符输入，更安全
+          echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            
+            # 2. 拉取刚刚构建好的、带有唯一版本号的镜像
+          docker pull ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            
+            # 3. 停止并删除旧的网站容器（如果存在的话）
+          docker stop my-website || true
+          docker rm my-website || true
+            
+            # 4. 启动一个新的容器，使用最新的镜像
+          docker run -d -p 80:80 --name my-website ${{ env.IMAGE_NAME }}:${{ github.sha }}
